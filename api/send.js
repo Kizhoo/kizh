@@ -8,12 +8,10 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS, GET');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   
-  // Handle preflight requests
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
   
-  // Handle GET request for health check
   if (req.method === 'GET') {
     return res.status(200).json({
       status: 'ok',
@@ -22,7 +20,6 @@ export default async function handler(req, res) {
     });
   }
   
-  // Only POST allowed for sending messages
   if (req.method !== 'POST') {
     return res.status(405).json({
       success: false,
@@ -33,10 +30,8 @@ export default async function handler(req, res) {
   try {
     console.log('📨 Received message request');
     
-    // Parse request body
     const { senderName, message, photos = [] } = req.body;
     
-    // Validate input
     if (!senderName || !message) {
       return res.status(400).json({
         success: false,
@@ -44,42 +39,26 @@ export default async function handler(req, res) {
       });
     }
     
-    // Initialize Supabase client
-    const supabaseUrl = "https://sdhjhqyowzvwnwhkhseg.supabase.co";
-    const supabaseKey = " sb_publishable_z1du_teMwE39uEa18VMEJw_8Cqb3cg8"; // Use service key for full access
+    // ✅ AMBIL BOT TOKEN & CHAT ID DARI ENV VARIABLES
+    const BOT_TOKEN = process.env.BOT_TOKEN;
+    const CHAT_ID = process.env.CHAT_ID;
+    
+    if (!BOT_TOKEN || !CHAT_ID) {
+      return res.status(500).json({
+        success: false,
+        error: 'Telegram bot not configured properly'
+      });
+    }
+    
+    // Initialize Supabase
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
     
     if (!supabaseUrl || !supabaseKey) {
       throw new Error('Supabase configuration missing');
     }
     
     const supabase = createClient(supabaseUrl, supabaseKey);
-    
-    // Get Telegram config from database
-    const { data: configData, error: configError } = await supabase
-      .from('app_config')
-      .select('config_key, config_value')
-      .in('config_key', ['BOT_TOKEN', 'CHAT_ID']);
-    
-    if (configError) {
-      console.error('Config error:', configError);
-      throw new Error('Failed to get configuration');
-    }
-    
-    // Convert config array to object
-    const config = {};
-    configData?.forEach(item => {
-      config[item.config_key] = item.config_value;
-    });
-    
-    const botToken = config.BOT_TOKEN;
-    const chatId = config.CHAT_ID;
-    
-    if (!botToken || !chatId) {
-      return res.status(500).json({
-        success: false,
-        error: 'Telegram bot not configured'
-      });
-    }
     
     // Save message to database
     const { data: messageData, error: dbError } = await supabase
@@ -101,7 +80,7 @@ export default async function handler(req, res) {
     const messageId = messageData.id;
     console.log(`💾 Message saved with ID: ${messageId}`);
     
-    // Send to Telegram
+    // Format Telegram message
     const telegramMessage = `📨 *PESAN BARU DARI TO-KIZHOO*\n\n👤 **Pengirim:** ${senderName}\n💬 **Pesan:**\n${message}\n\n🕒 **Waktu:** ${new Date().toLocaleString('id-ID')}`;
     
     let telegramResponse = null;
@@ -113,23 +92,21 @@ export default async function handler(req, res) {
         console.log(`📷 Sending ${photos.length} photos...`);
         
         // Send first photo with caption
-        telegramResponse = await sendTelegramPhoto(botToken, chatId, photos[0], telegramMessage);
+        telegramResponse = await sendTelegramPhoto(BOT_TOKEN, CHAT_ID, photos[0], telegramMessage);
         
-        // Send remaining photos
+        // Send remaining photos without caption (to avoid spam)
         for (let i = 1; i < photos.length; i++) {
-          await sendTelegramPhoto(botToken, chatId, photos[i], `📸 Gambar ${i + 1} dari ${senderName}`);
-          if (i < photos.length - 1) {
-            await sleep(300); // Delay to avoid rate limiting
-          }
+          await sendTelegramPhoto(BOT_TOKEN, CHAT_ID, photos[i], '');
+          await sleep(500); // Delay to avoid rate limiting
         }
       } else {
         // Send text only
         console.log('📝 Sending text message...');
-        telegramResponse = await sendTelegramMessage(botToken, chatId, telegramMessage);
+        telegramResponse = await sendTelegramMessage(BOT_TOKEN, CHAT_ID, telegramMessage);
       }
       
-      // Update message status to sent
-      const { error: updateError } = await supabase
+      // Update message status
+      await supabase
         .from('messages')
         .update({
           telegram_status: 'sent',
@@ -137,16 +114,11 @@ export default async function handler(req, res) {
         })
         .eq('id', messageId);
       
-      if (updateError) {
-        console.error('Update error:', updateError);
-      }
-      
       console.log('✅ Message sent successfully');
       
-      // Return success response
       return res.status(200).json({
         success: true,
-        message: 'Pesan berhasil dikirim ke Telegram',
+        message: 'Pesan berhasil dikirim ke Kizhoo!',
         messageId: messageId,
         timestamp: new Date().toISOString()
       });
@@ -155,7 +127,6 @@ export default async function handler(req, res) {
       telegramError = telegramErr.message;
       console.error('Telegram error:', telegramErr);
       
-      // Update message status to failed
       await supabase
         .from('messages')
         .update({
@@ -182,15 +153,13 @@ export default async function handler(req, res) {
   }
 }
 
-// Helper function to send Telegram message
+// Helper functions
 async function sendTelegramMessage(botToken, chatId, text) {
   const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
   
   const response = await fetch(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       chat_id: chatId,
       text: text,
@@ -207,28 +176,26 @@ async function sendTelegramMessage(botToken, chatId, text) {
   return response.json();
 }
 
-// Helper function to send Telegram photo
 async function sendTelegramPhoto(botToken, chatId, photoBase64, caption) {
   const url = `https://api.telegram.org/bot${botToken}/sendPhoto`;
   
-  // Validate and extract base64 data
-  if (!photoBase64 || !photoBase64.includes('base64,')) {
-    throw new Error('Invalid base64 image data');
-  }
-  
+  // Extract base64 data
   const base64Data = photoBase64.split(';base64,').pop();
   if (!base64Data) {
-    throw new Error('No base64 data found');
+    throw new Error('Invalid image data');
   }
   
-  // Decode base64 to buffer
   const buffer = Buffer.from(base64Data, 'base64');
   
-  // Create FormData
+  // Create FormData - FIX FOR ANDROID
   const formData = new FormData();
   formData.append('chat_id', chatId);
-  formData.append('caption', caption.substring(0, 1024)); // Telegram caption limit
-  formData.append('parse_mode', 'Markdown');
+  
+  if (caption) {
+    formData.append('caption', caption.substring(0, 1024));
+    formData.append('parse_mode', 'Markdown');
+  }
+  
   formData.append('photo', buffer, {
     filename: `photo_${Date.now()}.jpg`,
     contentType: 'image/jpeg'
@@ -247,7 +214,6 @@ async function sendTelegramPhoto(botToken, chatId, photoBase64, caption) {
   return response.json();
 }
 
-// Helper function for delay
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
-      }
+        }
