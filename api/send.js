@@ -45,8 +45,8 @@ export default async function handler(req, res) {
     }
     
     // Initialize Supabase client
-    const supabaseUrl = process.env.SUPABASE_URL;
-    const supabaseKey = process.env.SUPABASE_SERVICE_KEY; // Use service key for full access
+    const supabaseUrl = "https://sdhjhqyowzvwnwhkhseg.supabase.co";
+    const supabaseKey = " sb_publishable_z1du_teMwE39uEa18VMEJw_8Cqb3cg8"; // Use service key for full access
     
     if (!supabaseUrl || !supabaseKey) {
       throw new Error('Supabase configuration missing');
